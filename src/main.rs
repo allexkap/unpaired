@@ -1,19 +1,43 @@
 use std::{
     cmp::Reverse,
     collections::HashMap,
-    fmt::{self, Display},
-    fs::{DirEntry, File},
+    fmt,
+    fs::File,
     hash::Hasher,
-    io::{self, BufReader, Read},
-    path::{self, Path, PathBuf},
+    io::{self, Read},
+    path::{Path, PathBuf},
 };
 
+use clap::Parser;
 use seahash::SeaHasher;
 use walkdir::WalkDir;
 
-#[derive(PartialEq, Eq, Hash, Clone, Debug)]
+#[derive(Parser)]
+#[command(version)]
+struct Args {
+    #[arg(default_value = ".")]
+    path: PathBuf,
+}
+
+#[derive(Clone, Debug)]
 struct FileInfo {
     path: PathBuf,
+    meta: std::fs::Metadata,
+}
+
+impl FileInfo {
+    fn new<T: AsRef<Path>>(path: &T, meta: std::fs::Metadata) -> FileInfo {
+        FileInfo {
+            path: path.as_ref().to_owned(),
+            meta,
+        }
+    }
+}
+
+impl fmt::Display for FileInfo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.path.display())
+    }
 }
 
 #[derive(PartialOrd, Ord, PartialEq, Eq, Hash, Clone, Copy, Debug)]
@@ -22,7 +46,16 @@ struct FileData {
     hash: Option<u64>,
 }
 
-impl Display for FileData {
+impl FileData {
+    fn new(info: &FileInfo) -> io::Result<FileData> {
+        Ok(FileData {
+            size: info.meta.len(),
+            hash: Some(hash_file(&info.path)?),
+        })
+    }
+}
+
+impl fmt::Display for FileData {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         const UNITS: [&str; 5] = ["B", "kB", "MB", "GB", "TB"];
         let mut unit = UNITS[4];
@@ -41,21 +74,15 @@ impl Display for FileData {
             None => "-".to_owned(),
         };
 
-        write!(f, "File({hash_str}: {size:.2}{unit})")
+        write!(
+            f,
+            "FileData({hash_str}: {size:.0$}{unit})",
+            if unit == UNITS[0] { 0 } else { 1 }
+        )
     }
 }
 
-impl FileData {
-    fn new<T: AsRef<Path>>(path: &T) -> io::Result<FileData> {
-        let path = path.as_ref();
-        Ok(FileData {
-            size: path.metadata()?.len(),
-            hash: Some(hash_file(path)?),
-        })
-    }
-}
-
-fn hash_file<T: AsRef<Path>>(path: T) -> io::Result<u64> {
+fn hash_file<T: AsRef<Path>>(path: &T) -> io::Result<u64> {
     let mut file = File::open(path)?;
     let mut buf = [0; 4096];
     let mut hasher = SeaHasher::new();
@@ -67,32 +94,34 @@ fn hash_file<T: AsRef<Path>>(path: T) -> io::Result<u64> {
     }
 }
 
+fn process_entry(entry: walkdir::DirEntry) -> io::Result<(FileInfo, FileData)> {
+    let info = FileInfo::new(&entry.path(), entry.metadata()?);
+    let data = FileData::new(&info)?;
+    return Ok((info, data));
+}
+
 fn main() {
-    let root = path::absolute(".").unwrap();
+    let args = Args::parse();
+
     let mut files: HashMap<FileData, Vec<FileInfo>> = HashMap::new();
-    for entry in WalkDir::new(root).into_iter().filter_map(Result::ok) {
+    for entry in WalkDir::new(args.path).into_iter().filter_map(Result::ok) {
         if !entry.file_type().is_file() {
             continue;
         }
 
-        let data = match FileData::new(&entry.path()) {
-            Ok(data) => data,
-            Err(err) => {
-                println!("{err:?}");
-                continue;
+        match process_entry(entry) {
+            Ok((info, data)) => {
+                if let Some(v) = files.get_mut(&data) {
+                    v.push(info)
+                } else {
+                    files.insert(data, vec![info]);
+                }
             }
-        };
-
-        let info = FileInfo {
-            path: entry.path().to_owned(),
-        };
-
-        if let Some(v) = files.get_mut(&data) {
-            v.push(info)
-        } else {
-            files.insert(data, vec![info]);
+            Err(err) => println!("{err}"),
         }
     }
+
+    println!("files = {}", files.len());
 
     let mut sorted_files: Vec<(FileData, Vec<FileInfo>)> = files.drain().collect();
     sorted_files.sort_by_key(|k| Reverse((k.0.size * k.1.len() as u64, k.0.hash)));
@@ -100,7 +129,7 @@ fn main() {
     for (data, infos) in sorted_files.into_iter() {
         println!("\n{data}");
         for info in infos {
-            println!("{info:?}");
+            println!("{info}");
         }
     }
 }
