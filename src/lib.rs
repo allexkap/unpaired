@@ -11,6 +11,7 @@ use std::{
 
 use seahash::SeaHasher;
 use serde::{Deserialize, Serialize};
+use tqdm::Iter;
 use walkdir::WalkDir;
 
 #[derive(Clone, Copy, Serialize, Deserialize, Debug)]
@@ -231,7 +232,7 @@ pub fn process_dir(path: impl AsRef<Path>) -> FileIndex {
 
     let ambiguous_files = file_index.remove_ambiguous();
 
-    for (info, data) in ambiguous_files.into_iter() {
+    for (info, data) in ambiguous_files.into_iter().tqdm() {
         match data.with_hash(&info) {
             Ok(data) => file_index.fast_add(info, data),
             Err(err) => skip_file(info.path, err),
