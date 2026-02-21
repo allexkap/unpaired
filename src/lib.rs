@@ -2,37 +2,63 @@ use std::{
     cmp::Reverse,
     collections::{HashMap, hash_map},
     fmt,
+    fs::{self},
     hash::Hasher,
     io::{self, Read},
     path::{Path, PathBuf},
+    time::SystemTime,
 };
 
 use seahash::SeaHasher;
+use serde::{Deserialize, Serialize};
 use walkdir::WalkDir;
 
-mod fiemap;
+#[derive(Clone, Copy, Serialize, Deserialize, Debug)]
+pub struct MetadataSnapshot {
+    len: u64,
+    accessed: Option<SystemTime>,
+    modified: Option<SystemTime>,
+    created: Option<SystemTime>,
+    ino: Option<u64>,
+}
+
+fn get_ino(value: &fs::Metadata) -> Option<u64> {
+    #[cfg(target_os = "linux")]
+    return Some(std::os::unix::fs::MetadataExt::ino(value));
+
+    #[cfg(not(target_os = "linux"))]
+    return None;
+}
+
+impl From<fs::Metadata> for MetadataSnapshot {
+    fn from(value: fs::Metadata) -> Self {
+        Self {
+            len: value.len(),
+            accessed: value.accessed().ok(),
+            modified: value.modified().ok(),
+            created: value.created().ok(),
+            ino: get_ino(&value),
+        }
+    }
+}
 
 /// A representation of a file in the filesystem.
 ///
 /// It does **not** store the file contents.
-#[derive(Clone, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct FileInfo {
     /// Full path to the file.
     path: PathBuf,
 
     /// File metadata
-    meta: std::fs::Metadata,
-
-    /// Physical offset of the first extent.
-    fe_physical: Option<u64>,
+    meta: MetadataSnapshot,
 }
 
 impl FileInfo {
-    fn new(path: impl AsRef<Path>, meta: std::fs::Metadata, fe_physical: Option<u64>) -> FileInfo {
+    fn new(path: impl AsRef<Path>, meta: fs::Metadata) -> FileInfo {
         FileInfo {
             path: path.as_ref().to_owned(),
-            meta,
-            fe_physical,
+            meta: meta.into(),
         }
     }
 }
@@ -46,7 +72,7 @@ impl fmt::Display for FileInfo {
 /// File identification data with LoD.
 ///
 /// Used for comparing and grouping files by their actual content.
-#[derive(PartialOrd, Ord, PartialEq, Eq, Hash, Clone, Copy, Debug)]
+#[derive(Clone, Copy, Serialize, Deserialize, PartialOrd, Ord, PartialEq, Eq, Hash, Debug)]
 pub struct FileData {
     /// File size in bytes.
     size: u64,
@@ -58,7 +84,7 @@ pub struct FileData {
 impl FileData {
     fn new(info: &FileInfo) -> io::Result<FileData> {
         Ok(FileData {
-            size: info.meta.len(),
+            size: info.meta.len,
             hash: None,
         })
     }
@@ -98,19 +124,20 @@ impl fmt::Display for FileData {
     }
 }
 
+#[derive(Clone, Serialize, Deserialize, Debug)]
 enum FileGroup {
     Uniq(FileInfo),
     Many(Vec<FileInfo>),
 }
 
-#[derive(Default)]
-pub struct Files {
-    inner: HashMap<FileData, FileGroup>,
+#[derive(Default, Clone, Serialize, Deserialize, Debug)]
+pub struct FileIndex {
+    files: HashMap<FileData, FileGroup>,
 }
 
-impl Files {
+impl FileIndex {
     pub fn fast_add(&mut self, info: FileInfo, data: FileData) {
-        match self.inner.entry(data) {
+        match self.files.entry(data) {
             hash_map::Entry::Occupied(mut entry) => {
                 let prev_info = entry.get_mut();
                 match prev_info {
@@ -127,11 +154,11 @@ impl Files {
     }
 
     pub fn len(&self) -> usize {
-        self.inner.len()
+        self.files.len()
     }
 
     pub fn remove_ambiguous(&mut self) -> Vec<(FileInfo, FileData)> {
-        self.inner
+        self.files
             .iter_mut()
             .filter_map(|entry| match entry.1 {
                 FileGroup::Uniq(_) => None,
@@ -145,7 +172,7 @@ impl Files {
 
     pub fn get_preview(&self) -> Vec<(&FileData, &Vec<FileInfo>)> {
         let mut sorted_files: Vec<_> = self
-            .inner
+            .files
             .iter()
             .filter_map(|entry| match entry {
                 (data, FileGroup::Many(file_group)) if file_group.len() > 1 => {
@@ -157,10 +184,17 @@ impl Files {
         sorted_files.sort_by_key(|k| Reverse((k.0.size * k.1.len() as u64, k.0.hash)));
         sorted_files
     }
+
+    pub fn dump(&self, path: impl AsRef<Path>) -> io::Result<()> {
+        let file = fs::File::create(path)?;
+        let writer = io::BufWriter::new(file);
+        postcard::to_io(&self, writer).expect("failed to dump file index");
+        Ok(())
+    }
 }
 
 fn hash_file(path: impl AsRef<Path>) -> io::Result<u64> {
-    let mut file = std::fs::File::open(path)?;
+    let mut file = fs::File::open(path)?;
     let mut buf = [0; 4096];
     let mut hasher = SeaHasher::new();
     loop {
@@ -172,12 +206,7 @@ fn hash_file(path: impl AsRef<Path>) -> io::Result<u64> {
 }
 
 fn process_entry(entry: &walkdir::DirEntry) -> io::Result<(FileInfo, FileData)> {
-    let fe_physical = fiemap::read_fiemap(entry.path(), Some(1))?
-        .1
-        .get(0)
-        .map(|f| f.fe_physical);
-
-    let info = FileInfo::new(entry.path(), entry.metadata()?, fe_physical);
+    let info = FileInfo::new(entry.path(), entry.metadata()?);
     let data = FileData::new(&info)?;
     return Ok((info, data));
 }
@@ -186,8 +215,8 @@ fn skip_file(path: impl AsRef<Path>, err: std::io::Error) {
     println!("{}: {}", path.as_ref().display(), err);
 }
 
-pub fn process_dir(path: impl AsRef<Path>) -> Files {
-    let mut files = Files::default();
+pub fn process_dir(path: impl AsRef<Path>) -> FileIndex {
+    let mut file_index = FileIndex::default();
 
     for entry in WalkDir::new(path).into_iter().filter_map(Result::ok) {
         if !entry.file_type().is_file() {
@@ -195,20 +224,19 @@ pub fn process_dir(path: impl AsRef<Path>) -> Files {
         }
 
         match process_entry(&entry) {
-            Ok((info, data)) => files.fast_add(info, data),
+            Ok((info, data)) => file_index.fast_add(info, data),
             Err(err) => skip_file(entry.path(), err),
         }
     }
 
-    let mut ambiguous_files = files.remove_ambiguous();
-    ambiguous_files.sort_by_key(|k| k.0.fe_physical);
+    let ambiguous_files = file_index.remove_ambiguous();
 
     for (info, data) in ambiguous_files.into_iter() {
         match data.with_hash(&info) {
-            Ok(data) => files.fast_add(info, data),
+            Ok(data) => file_index.fast_add(info, data),
             Err(err) => skip_file(info.path, err),
         };
     }
 
-    files
+    file_index
 }
