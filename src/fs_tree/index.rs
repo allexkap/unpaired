@@ -7,7 +7,7 @@ use std::{
 use super::{FsTreeNodeId, nodes::FileData};
 
 #[derive(Clone, Debug)]
-enum FileGroup {
+pub enum FileGroup {
     Uniq(FsTreeNodeId),
     Many(Vec<FsTreeNodeId>),
 }
@@ -15,6 +15,15 @@ enum FileGroup {
 #[derive(Default, Clone, Debug)]
 pub struct FileIndex {
     grouped_files: HashMap<FileData, FileGroup>,
+}
+
+impl FileGroup {
+    pub fn len(&self) -> usize {
+        match self {
+            FileGroup::Uniq(_) => 1,
+            FileGroup::Many(node_ids) => node_ids.len(),
+        }
+    }
 }
 
 impl FileIndex {
@@ -63,5 +72,9 @@ impl FileIndex {
             .collect();
         sorted_files.sort_by_key(|k| cmp::Reverse((k.0.size * k.1.len() as u64, k.0.hash)));
         sorted_files
+    }
+
+    pub fn get(&self, file_data: FileData) -> Option<&FileGroup> {
+        self.grouped_files.get(&file_data)
     }
 }

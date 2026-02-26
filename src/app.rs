@@ -1,34 +1,29 @@
 use color_eyre::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use ratatui::{
-    DefaultTerminal, Frame,
-    widgets::{HighlightSpacing, List, ListState},
-};
+use ratatui::{DefaultTerminal, Frame};
 
-use crate::fs_tree::{FsTree, FsTreeNodeId};
+use crate::fs_tree::FsTree;
 
-#[derive(Debug)]
+use self::file_list_widget::FileListWidget;
+
+mod file_list_widget;
 pub struct App {
+    file_list: FileListWidget,
     fs_tree: FsTree,
-    current_node_id: Option<FsTreeNodeId>,
-    list_items: Vec<(FsTreeNodeId, String)>,
-    list_state: ListState,
     running: bool,
 }
 
 impl App {
     pub fn new(fs_tree: FsTree) -> Self {
         Self {
+            file_list: FileListWidget::new(&fs_tree),
             fs_tree,
-            current_node_id: None,
-            list_items: Vec::default(),
-            list_state: ListState::default(),
             running: false,
         }
     }
 
     pub fn run(mut self, mut terminal: DefaultTerminal) -> Result<()> {
-        self.init();
+        self.running = true;
         while self.running {
             terminal.draw(|frame| self.render(frame))?;
             self.handle_crossterm_events()?;
@@ -36,18 +31,8 @@ impl App {
         Ok(())
     }
 
-    fn init(&mut self) {
-        self.update_list_items();
-        self.list_state.select_first();
-        self.running = true;
-    }
-
     fn render(&mut self, frame: &mut Frame) {
-        let list = List::new(self.list_items.iter().map(|i| i.1.clone()))
-            .highlight_symbol("> ")
-            .highlight_spacing(HighlightSpacing::Always);
-
-        frame.render_stateful_widget(list, frame.area(), &mut self.list_state)
+        self.file_list.render(frame);
     }
 
     fn handle_crossterm_events(&mut self) -> Result<()> {
@@ -64,33 +49,12 @@ impl App {
         match (key.modifiers, key.code) {
             (_, KeyCode::Esc | KeyCode::Char('q'))
             | (KeyModifiers::CONTROL, KeyCode::Char('c') | KeyCode::Char('C')) => self.quit(),
-            (_, KeyCode::Down) => self.list_state.select_next(),
-            (_, KeyCode::Up) => self.list_state.select_previous(),
-            (_, KeyCode::Left) => {
-                if let Some(node_id) = self.current_node_id {
-                    self.current_node_id = self.fs_tree.get_parent(node_id);
-                    self.update_list_items();
-                }
-            }
-            (_, KeyCode::Right) => {
-                self.current_node_id = Some(self.list_items[self.list_state.selected().unwrap()].0);
-                self.update_list_items();
-            }
+            (_, KeyCode::Down) => self.file_list.next(),
+            (_, KeyCode::Up) => self.file_list.prev(),
+            (_, KeyCode::Left) => self.file_list.back(&self.fs_tree),
+            (_, KeyCode::Right) => self.file_list.enter(&self.fs_tree),
             _ => {}
         }
-    }
-
-    fn update_list_items(&mut self) {
-        self.list_items = match self.current_node_id {
-            Some(id) => self
-                .fs_tree
-                .get_children(id)
-                .into_iter()
-                .map(|child_id| (child_id, self.fs_tree.get_name(child_id).to_owned()))
-                .collect(),
-            None => self.fs_tree.get_roots(),
-        };
-        self.list_state.select_first();
     }
 
     fn quit(&mut self) {

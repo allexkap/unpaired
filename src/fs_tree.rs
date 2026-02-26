@@ -6,7 +6,11 @@ use std::{
 use tqdm::Iter;
 use walkdir::{DirEntry, WalkDir};
 
-use self::{index::FileIndex, nodes::*, utils::hash_file};
+use self::{
+    index::{FileGroup, FileIndex},
+    nodes::*,
+    utils::hash_file,
+};
 
 mod index;
 mod nodes;
@@ -129,6 +133,18 @@ impl FsTree {
 
     pub fn get_children(&self, node_id: FsTreeNodeId) -> Vec<FsTreeNodeId> {
         node_id.children(&self.arena).collect()
+    }
+
+    pub fn get_node(&self, node_id: FsTreeNodeId) -> &FsTreeNode {
+        self.arena[node_id].get()
+    }
+
+    pub fn get_same_nodes(&self, node_id: FsTreeNodeId) -> Option<&FileGroup> {
+        self.arena[node_id]
+            .get()
+            .kind
+            .as_file()
+            .and_then(|file_node| self.index.get(file_node.data))
     }
 
     pub fn get_name(&self, node_id: FsTreeNodeId) -> &str {
