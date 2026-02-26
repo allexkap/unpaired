@@ -1,3 +1,5 @@
+//! Utility helpers.
+
 use std::{
     fs,
     hash::Hasher,

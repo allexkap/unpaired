@@ -1,3 +1,5 @@
+//! File indexing and duplicate grouping logic.
+
 use std::{
     cmp,
     collections::{HashMap, hash_map},
@@ -6,22 +8,27 @@ use std::{
 
 use super::{FsTreeNodeId, nodes::FileData};
 
+/// Group of files that share identical [`FileData`].
 #[derive(Clone, Debug)]
 pub enum FileGroup {
-    Uniq(FsTreeNodeId),
-    Many(Vec<FsTreeNodeId>),
+    /// Exactly one file with this data.
+    Unique(FsTreeNodeId),
+    /// Two or more files with identical data.
+    Duplicates(Vec<FsTreeNodeId>),
 }
 
+/// Index mapping file data to nodes.
 #[derive(Default, Clone, Debug)]
 pub struct FileIndex {
+    /// Grouped files by identity.
     grouped_files: HashMap<FileData, FileGroup>,
 }
 
 impl FileGroup {
     pub fn len(&self) -> usize {
         match self {
-            FileGroup::Uniq(_) => 1,
-            FileGroup::Many(node_ids) => node_ids.len(),
+            FileGroup::Unique(_) => 1,
+            FileGroup::Duplicates(node_ids) => node_ids.len(),
         }
     }
 }
@@ -32,14 +39,14 @@ impl FileIndex {
             hash_map::Entry::Occupied(mut entry) => {
                 let prev_group = entry.get_mut();
                 match prev_group {
-                    FileGroup::Uniq(prev_node_id) => {
-                        *prev_group = FileGroup::Many(vec![*prev_node_id, node_id]);
+                    FileGroup::Unique(prev_node_id) => {
+                        *prev_group = FileGroup::Duplicates(vec![*prev_node_id, node_id]);
                     }
-                    FileGroup::Many(file_group) => file_group.push(node_id),
+                    FileGroup::Duplicates(file_group) => file_group.push(node_id),
                 }
             }
             hash_map::Entry::Vacant(entry) => {
-                entry.insert(FileGroup::Uniq(node_id));
+                entry.insert(FileGroup::Unique(node_id));
             }
         }
     }
@@ -48,7 +55,7 @@ impl FileIndex {
         self.grouped_files
             .iter_mut()
             .filter_map(|entry| match entry {
-                (file_data, FileGroup::Many(file_group))
+                (file_data, FileGroup::Duplicates(file_group))
                     if file_data.hash.is_none() && file_data.size != 0 =>
                 {
                     Some(file_group.drain(..).zip(iter::repeat(*entry.0)))
@@ -64,7 +71,7 @@ impl FileIndex {
             .grouped_files
             .iter()
             .filter_map(|entry| match entry {
-                (data, FileGroup::Many(file_group)) if file_group.len() > 1 => {
+                (data, FileGroup::Duplicates(file_group)) if file_group.len() > 1 => {
                     Some((*data, file_group))
                 }
                 _ => None,

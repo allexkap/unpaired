@@ -1,3 +1,5 @@
+//! File list widget for browsing a single tree level.
+
 use ratatui::{
     Frame,
     widgets::{HighlightSpacing, List, ListState},

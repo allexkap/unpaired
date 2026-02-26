@@ -1,3 +1,5 @@
+//! Low-level FIEMAP bindings for retrieving file extents.
+
 use std::{fs::File, os::fd::AsRawFd, path::Path, u32};
 
 use nix::ioctl_readwrite;

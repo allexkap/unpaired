@@ -1,27 +1,39 @@
+//! Filesystem node types and related data structures.
+
 use std::{fmt, time::SystemTime};
 
 use enum_as_inner::EnumAsInner;
 
+/// File identity.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct FileData {
+    /// File size in bytes.
     pub size: u64,
+    /// Content hash.
     pub hash: Option<u64>,
 }
 
+/// File node metadata.
 #[derive(Clone, Copy, Debug)]
 pub struct FileNode {
+    /// Last modification time.
     pub modified: Option<SystemTime>,
+    /// File identity.
     pub data: FileData,
 }
 
+/// Directory node metadata.
 #[derive(Default, Clone, Copy, Debug)]
 pub struct DirNode {
+    /// Total size of descendant files in bytes.
     pub total_size: u64,
 }
 
+/// Placeholder node type.
 #[derive(Clone, Copy, Debug)]
 pub struct TestNode;
 
+/// Type of filesystem node.
 #[derive(Clone, Copy, Debug, EnumAsInner)]
 pub enum NodeKind {
     File(FileNode),
@@ -29,9 +41,12 @@ pub enum NodeKind {
     Test(TestNode),
 }
 
+/// Node stored in the tree.
 #[derive(Clone, Debug)]
 pub struct FsTreeNode {
+    /// Entry name.
     pub name: String,
+    /// Node content.
     pub kind: NodeKind,
 }
 

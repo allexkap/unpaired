@@ -1,3 +1,5 @@
+//! Terminal user interface.
+
 use color_eyre::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::{DefaultTerminal, Frame};
@@ -7,6 +9,7 @@ use crate::fs_tree::FsTree;
 use self::file_list_widget::FileListWidget;
 
 mod file_list_widget;
+
 pub struct App {
     file_list: FileListWidget,
     fs_tree: FsTree,

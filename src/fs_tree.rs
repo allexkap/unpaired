@@ -1,3 +1,5 @@
+//! Filesystem tree model and duplicate detection.
+
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
@@ -20,16 +22,23 @@ type FsTreeArena = indextree::Arena<FsTreeNode>;
 
 pub type FsTreeNodeId = indextree::NodeId;
 
+/// Configuration for building an [`FsTree`].
 #[derive(Clone, Copy, Debug)]
 pub struct FsTreeConfig {
+    /// Force hashing for files up to this size.
     pub force_hash_size: Option<u64>,
 }
 
+/// In-memory filesystem tree with duplicate index.
 #[derive(Clone, Debug)]
 pub struct FsTree {
+    /// Node storage arena.
     arena: FsTreeArena,
+    /// Root nodes and their base paths.
     roots: HashMap<FsTreeNodeId, PathBuf>,
+    /// File duplicate index.
     index: FileIndex,
+    /// Configuration.
     config: FsTreeConfig,
 }
 
