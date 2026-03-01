@@ -218,7 +218,7 @@ impl FsTree {
         }
     }
 
-    fn get_full_path(&self, node_id: FsTreeNodeId) -> PathBuf {
+    pub fn get_full_path(&self, node_id: FsTreeNodeId) -> PathBuf {
         let node = &self.arena[node_id];
         match node.parent() {
             Some(parent_id) => self.get_full_path(parent_id),

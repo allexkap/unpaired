@@ -1,17 +1,24 @@
 //! Terminal user interface.
-
+//!
 use color_eyre::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use ratatui::{DefaultTerminal, Frame};
+use ratatui::{
+    DefaultTerminal, Frame,
+    layout::{Constraint, Layout},
+    style::Style,
+    text::Line,
+    widgets::Block,
+};
 
-use crate::fs_tree::FsTree;
+use crate::{
+    app::fs_tree_panel::{FsTreePanel, FsTreePanelState},
+    fs_tree::FsTree,
+};
 
-use self::file_list_widget::FileListWidget;
-
-mod file_list_widget;
+mod fs_tree_panel;
 
 pub struct App {
-    file_list: FileListWidget,
+    panel_state: FsTreePanelState,
     fs_tree: FsTree,
     running: bool,
 }
@@ -19,7 +26,7 @@ pub struct App {
 impl App {
     pub fn new(fs_tree: FsTree) -> Self {
         Self {
-            file_list: FileListWidget::new(&fs_tree),
+            panel_state: FsTreePanelState::new(&fs_tree),
             fs_tree,
             running: false,
         }
@@ -35,7 +42,31 @@ impl App {
     }
 
     fn render(&mut self, frame: &mut Frame) {
-        self.file_list.render(frame);
+        let area = frame.area();
+
+        let [header, body, footer] = Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Fill(1),
+            Constraint::Length(1),
+        ])
+        .areas(area);
+
+        let [left, right] =
+            Layout::horizontal([Constraint::Fill(1), Constraint::Fill(1)]).areas(body);
+
+        frame.render_widget(
+            Line::styled(
+                format!("{} v{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION")),
+                Style::new().reversed(),
+            ),
+            header,
+        );
+
+        frame.render_widget(Line::styled("Placeholer", Style::new().reversed()), footer);
+
+        frame.render_stateful_widget(FsTreePanel::default(), left, &mut self.panel_state);
+
+        frame.render_widget(Block::bordered(), right);
     }
 
     fn handle_crossterm_events(&mut self) -> Result<()> {
@@ -52,10 +83,10 @@ impl App {
         match (key.modifiers, key.code) {
             (_, KeyCode::Esc | KeyCode::Char('q'))
             | (KeyModifiers::CONTROL, KeyCode::Char('c') | KeyCode::Char('C')) => self.quit(),
-            (_, KeyCode::Down) => self.file_list.next(),
-            (_, KeyCode::Up) => self.file_list.prev(),
-            (_, KeyCode::Left) => self.file_list.back(&self.fs_tree),
-            (_, KeyCode::Right) => self.file_list.enter(&self.fs_tree),
+            (_, KeyCode::Down) => self.panel_state.next(),
+            (_, KeyCode::Up) => self.panel_state.prev(),
+            (_, KeyCode::Left) => self.panel_state.back(&self.fs_tree),
+            (_, KeyCode::Right) => self.panel_state.enter(&self.fs_tree),
             _ => {}
         }
     }
