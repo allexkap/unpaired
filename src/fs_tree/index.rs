@@ -1,7 +1,6 @@
 //! File indexing and duplicate grouping logic.
 
 use std::{
-    cmp,
     collections::{HashMap, hash_map},
     iter,
 };
@@ -46,9 +45,7 @@ impl FileIndex {
                 }
                 entry.into_mut()
             }
-            hash_map::Entry::Vacant(entry) => {
-                entry.insert(FileGroup::Unique(node_id))
-            }
+            hash_map::Entry::Vacant(entry) => entry.insert(FileGroup::Unique(node_id)),
         }
     }
 
@@ -65,21 +62,6 @@ impl FileIndex {
             })
             .flatten()
             .collect()
-    }
-
-    pub fn get_preview(&self) -> Vec<(FileData, &Vec<FsTreeNodeId>)> {
-        let mut sorted_files: Vec<_> = self
-            .grouped_files
-            .iter()
-            .filter_map(|entry| match entry {
-                (data, FileGroup::Duplicates(file_group)) if file_group.len() > 1 => {
-                    Some((*data, file_group))
-                }
-                _ => None,
-            })
-            .collect();
-        sorted_files.sort_by_key(|k| cmp::Reverse((k.0.size * k.1.len() as u64, k.0.hash)));
-        sorted_files
     }
 
     pub fn get(&self, file_data: FileData) -> Option<&FileGroup> {

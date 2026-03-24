@@ -43,7 +43,7 @@ impl NodeKind {
         }
     }
 
-    pub fn get_uniqueness(&self)->f64 {
+    pub fn get_uniqueness(&self) -> f64 {
         let deer = self.like_a_deer();
         return deer.unique_files_count as f64 / (deer.files_count as f64);
     }

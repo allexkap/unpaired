@@ -48,7 +48,7 @@ impl FsTreeEntry {
     fn to_row(&self) -> Row<'_> {
         let size = bytes_to_string(self.kind.get_total_size());
         let is_dir = if self.kind.is_dir() { "/" } else { " " };
-        let (uniq, color) = match self.kind {
+        let (uniq, color) = match &self.kind {
             NodeKind::Dir(dir_node) => (
                 format!("{}/{}", dir_node.unique_files_count, dir_node.files_count),
                 if dir_node.unique_files_count == dir_node.files_count {
@@ -67,16 +67,7 @@ impl FsTreeEntry {
                     Color::Red
                 },
             ),
-            NodeKind::Error(_) => (format!("-"), Color::default()),
-        };
-
-        if self.kind.is_file() {
-            self.kind.as_file().unwrap().copies_count.to_string()
-        } else if self.kind.is_dir() {
-            let dir = self.kind.as_dir().unwrap();
-            format!("{}/{}", dir.unique_files_count, dir.files_count)
-        } else {
-            "".to_owned()
+            NodeKind::Error(err) => (err.clone(), Color::default()),
         };
 
         let cells: [Cell; Self::COLUMNS] = [
@@ -107,11 +98,13 @@ impl FsTreePanelState {
             fs_tree.get_full_path(node_id).to_string_lossy().to_string(),
         );
 
-        let entries: Vec<FsTreeEntry> = fs_tree
+        let mut entries: Vec<FsTreeEntry> = fs_tree
             .get_children(node_id)
             .into_iter()
             .map(|child_id| FsTreeEntry::new(child_id, fs_tree))
             .collect();
+
+        entries.sort_by(|a, b| b.kind.get_uniqueness().total_cmp(&a.kind.get_uniqueness()));
 
         let mut widget_state = TableState::default();
         widget_state.select_first();

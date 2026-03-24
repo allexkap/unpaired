@@ -126,28 +126,6 @@ impl FsTree {
         self.arena.count()
     }
 
-    pub fn print_tree(&self) {
-        for (root_id, _) in self.roots.clone() {
-            self.print_subtree(root_id, 0);
-        }
-    }
-
-    pub fn get_preview(&self) -> Vec<(FileData, Vec<PathBuf>)> {
-        self.index
-            .get_preview()
-            .into_iter()
-            .map(|(file_data, nodes)| {
-                (
-                    file_data,
-                    nodes
-                        .iter()
-                        .map(|node_id| self.get_full_path(*node_id))
-                        .collect(),
-                )
-            })
-            .collect()
-    }
-
     pub fn get_roots(&self) -> Vec<(FsTreeNodeId, &OsStr)> {
         self.roots
             .iter()
@@ -207,19 +185,12 @@ impl FsTree {
         FsTreeNode { name, kind }
     }
 
-    fn print_subtree(&self, node_id: FsTreeNodeId, depth: usize) {
-        println!("{}{:?}", "  ".repeat(depth), self.arena[node_id].get());
-
-        for child in node_id.children(&self.arena) {
-            self.print_subtree(child, depth + 1);
-        }
-    }
-
     fn resolve(&mut self, node_id: FsTreeNodeId) -> DirNode {
         let kind = match self.arena[node_id].get().kind {
             NodeKind::File(file_node) => NodeKind::File(FileNode {
+                data: file_node.data,
+                modified: file_node.modified,
                 copies_count: self.index.get(file_node.data).unwrap().len() as u64,
-                ..file_node
             }),
             NodeKind::Dir(_) => NodeKind::Dir(
                 node_id
