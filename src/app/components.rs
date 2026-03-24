@@ -2,8 +2,10 @@ use crossterm::event::KeyEvent;
 use ratatui::{Frame, layout::Rect};
 
 pub use fs_tree_panel::FsTreePanel;
+pub use same_nodes_panel::SameNodesPanel;
 
 mod fs_tree_panel;
+mod same_nodes_panel;
 
 pub trait Component {
     fn handle_key_event(&mut self, key: KeyEvent) -> color_eyre::Result<()>;

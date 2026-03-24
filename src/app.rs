@@ -9,11 +9,10 @@ use ratatui::{
     layout::{Constraint, Layout},
     style::Style,
     text::Line,
-    widgets::Paragraph,
 };
 
 use crate::{
-    app::components::{Component, FsTreePanel},
+    app::components::{Component, FsTreePanel, SameNodesPanel},
     fs_tree::FsTree,
 };
 
@@ -23,6 +22,7 @@ const APP_HELP: &'static str = "WARNING: Work in Progress";
 
 pub struct App {
     main_panel: FsTreePanel,
+    info_panel: SameNodesPanel,
     fs_tree: Rc<RefCell<FsTree>>,
     running: bool,
 }
@@ -30,8 +30,13 @@ pub struct App {
 impl App {
     pub fn new(fs_tree: FsTree) -> Self {
         let fs_tree_ref = Rc::new(RefCell::new(fs_tree));
+        let main_panel = FsTreePanel::new(fs_tree_ref.clone());
+        let info_panel =
+            SameNodesPanel::new(main_panel.get_selected().unwrap(), &fs_tree_ref.borrow());
+
         Self {
-            main_panel: FsTreePanel::new(fs_tree_ref.clone()),
+            main_panel,
+            info_panel,
             fs_tree: fs_tree_ref.clone(),
             running: false,
         }
@@ -76,15 +81,7 @@ impl App {
 
         self.main_panel.render(frame, left);
 
-        frame.render_widget(
-            Paragraph::new(
-                self.main_panel
-                    .get_selected()
-                    .map(|node_id| format!("{:#?}", self.fs_tree.borrow().get_node(node_id)))
-                    .unwrap_or_default(),
-            ),
-            right,
-        );
+        self.info_panel.render(frame, right);
     }
 
     fn handle_crossterm_events(&mut self) -> Result<()> {
@@ -103,6 +100,11 @@ impl App {
             | (KeyModifiers::CONTROL, KeyCode::Char('c') | KeyCode::Char('C')) => self.quit(),
             _ => self.main_panel.handle_key_event(key).unwrap(),
         }
+        // todo
+        self.info_panel = SameNodesPanel::new(
+            self.main_panel.get_selected().unwrap(),
+            &self.fs_tree.borrow(),
+        );
     }
 
     fn quit(&mut self) {
