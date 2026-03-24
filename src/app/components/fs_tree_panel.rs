@@ -6,6 +6,7 @@ use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Layout},
     prelude::Rect,
+    style::{Color, Style},
     text::{Line, Span},
     widgets::{Cell, HighlightSpacing, Row, Table, TableState},
 };
@@ -40,28 +41,50 @@ impl FsTreeEntry {
         Self {
             node_id,
             name: node.name.to_string_lossy().to_string(),
-            kind: node.kind,
+            kind: node.kind.clone(),
         }
     }
 
     fn to_row(&self) -> Row<'_> {
-        let size = self.kind.get_total_size();
+        let size = bytes_to_string(self.kind.get_total_size());
         let is_dir = if self.kind.is_dir() { "/" } else { " " };
-        let dupes_count = if self.kind.is_file() {
-            self.kind.as_file().unwrap().dupes_count.to_string()
+        let (uniq, color) = match self.kind {
+            NodeKind::Dir(dir_node) => (
+                format!("{}/{}", dir_node.unique_files_count, dir_node.files_count),
+                if dir_node.unique_files_count == dir_node.files_count {
+                    Color::Green
+                } else if dir_node.unique_files_count == 0 {
+                    Color::Red
+                } else {
+                    Color::Yellow
+                },
+            ),
+            NodeKind::File(file_node) => (
+                format!("{}", file_node.copies_count),
+                if file_node.copies_count == 1 {
+                    Color::Green
+                } else {
+                    Color::Red
+                },
+            ),
+            NodeKind::Error(_) => (format!("-"), Color::default()),
+        };
+
+        if self.kind.is_file() {
+            self.kind.as_file().unwrap().copies_count.to_string()
         } else if self.kind.is_dir() {
             let dir = self.kind.as_dir().unwrap();
-            format!("{}/{}", dir.dupes_count, dir.files_count)
+            format!("{}/{}", dir.unique_files_count, dir.files_count)
         } else {
             "".to_owned()
         };
 
         let cells: [Cell; Self::COLUMNS] = [
-            Line::raw(bytes_to_string(size))
+            Line::raw(size).alignment(Alignment::Right).into(),
+            Cell::default(),
+            Line::styled(uniq, Style::default().fg(color))
                 .alignment(Alignment::Right)
                 .into(),
-            Cell::default(),
-            Line::raw(dupes_count).alignment(Alignment::Right).into(),
             Cell::default(),
             is_dir.into(),
             self.name.clone().into(),
@@ -84,7 +107,7 @@ impl FsTreePanelState {
             fs_tree.get_full_path(node_id).to_string_lossy().to_string(),
         );
 
-        let entries = fs_tree
+        let entries: Vec<FsTreeEntry> = fs_tree
             .get_children(node_id)
             .into_iter()
             .map(|child_id| FsTreeEntry::new(child_id, fs_tree))

@@ -180,11 +180,11 @@ impl FsTree {
                 NodeKind::File(FileNode {
                     modified,
                     data,
-                    dupes_count: 0,
+                    copies_count: 0,
                 })
             }
             ft if ft.is_dir() => NodeKind::Dir(DirNode::default()),
-            _ => NodeKind::Test(TestNode),
+            ft => NodeKind::Error(format!("Unsupported filetype={ft:?}")),
         };
         FsTreeNode { name, kind }
     }
@@ -197,46 +197,28 @@ impl FsTree {
         }
     }
 
-    fn resolve_size(&mut self, node_id: FsTreeNodeId) -> u64 {
-        match self.arena[node_id].get().kind {
-            NodeKind::File(file_node) => file_node.data.size,
-            NodeKind::Dir(_) => {
-                let total_size = node_id
+    fn resolve(&mut self, node_id: FsTreeNodeId) -> DirNode {
+        let kind = match self.arena[node_id].get().kind {
+            NodeKind::File(file_node) => NodeKind::File(FileNode {
+                copies_count: self.index.get(file_node.data).unwrap().len() as u64,
+                ..file_node
+            }),
+            NodeKind::Dir(_) => NodeKind::Dir(
+                node_id
                     .children(&self.arena)
                     .collect::<Vec<_>>()
                     .into_iter()
-                    .map(|child_id| self.resolve_size(child_id))
-                    .sum();
-                self.arena[node_id]
-                    .get_mut()
-                    .kind
-                    .as_dir_mut()
-                    .expect("node type has changed unexpectedly during size resolution")
-                    .total_size = total_size;
-                total_size
-            }
-            NodeKind::Test(_) => 0,
-        }
-    }
-
-    fn resolve(&mut self, node_id: FsTreeNodeId) -> &FsTreeNode {
-        let kind = match self.arena[node_id].get().kind {
-            NodeKind::File(file_node) => NodeKind::File(FileNode {
-                dupes_count: self.index.get(file_node.data).unwrap().len() as u64,
-                ..file_node
-            }),
-            NodeKind::Dir(_) => node_id
-                .children(&self.arena)
-                .collect::<Vec<_>>()
-                .into_iter()
-                .map(|child_id| self.resolve(child_id).kind)
-                .sum::<NodeKind>(),
-            NodeKind::Test(_) => todo!(),
+                    .map(|child_id| self.resolve(child_id))
+                    .sum::<DirNode>(),
+            ),
+            ref other => other.clone(),
         };
 
-        let node = self.arena[node_id].get_mut();
-        node.kind = kind;
-        node
+        let deer = kind.like_a_deer();
+
+        self.arena[node_id].get_mut().kind = kind;
+
+        deer
     }
 
     pub fn get_full_path(&self, node_id: FsTreeNodeId) -> PathBuf {

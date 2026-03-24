@@ -14,71 +14,70 @@ pub struct FileData {
 
 #[derive(Clone, Copy, Debug)]
 pub struct FileNode {
-    pub modified: Option<SystemTime>,
-    pub dupes_count: u64,
     pub data: FileData,
+    pub modified: Option<SystemTime>,
+    pub copies_count: u64,
 }
 
 #[derive(Default, Clone, Copy, Debug)]
 pub struct DirNode {
     pub total_size: u64,
+    pub dirs_count: u64,
     pub files_count: u64,
-    pub dupes_count: u64,
+    pub unique_files_count: u64,
 }
 
-#[derive(Clone, Copy, Debug)]
-pub struct TestNode;
-
-#[derive(Clone, Copy, Debug, EnumAsInner)]
+#[derive(Clone, Debug, EnumAsInner)]
 pub enum NodeKind {
-    File(FileNode),
     Dir(DirNode),
-    Test(TestNode),
+    File(FileNode),
+    Error(String),
 }
 
 impl NodeKind {
     pub fn get_total_size(&self) -> u64 {
         match self {
-            NodeKind::File(file_node) => file_node.data.size,
             NodeKind::Dir(dir_node) => dir_node.total_size,
-            NodeKind::Test(_) => 0,
+            NodeKind::File(file_node) => file_node.data.size,
+            _ => 0,
+        }
+    }
+
+    pub fn get_uniqueness(&self)->f64 {
+        let deer = self.like_a_deer();
+        return deer.unique_files_count as f64 / (deer.files_count as f64);
+    }
+
+    pub fn like_a_deer(&self) -> DirNode {
+        match *self {
+            NodeKind::Dir(dir_node) => dir_node,
+            NodeKind::File(file_node) => DirNode {
+                total_size: file_node.data.size,
+                dirs_count: 0,
+                files_count: 1,
+                unique_files_count: (file_node.copies_count == 1) as u64,
+            },
+            _ => DirNode::default(),
         }
     }
 }
 
-impl std::ops::Add for NodeKind {
-    type Output = NodeKind;
+impl std::ops::Add for DirNode {
+    type Output = DirNode;
 
     fn add(self, rhs: Self) -> Self::Output {
-        fn convert_to_dir(node_kind: NodeKind) -> DirNode {
-            match node_kind {
-                NodeKind::File(file_node) => DirNode {
-                    total_size: file_node.data.size,
-                    files_count: 1,
-                    dupes_count: if file_node.dupes_count != 1 { 1 } else { 0 },
-                },
-                NodeKind::Dir(dir_node) => dir_node,
-                NodeKind::Test(_) => DirNode {
-                    total_size: 0,
-                    files_count: 0,
-                    dupes_count: 0,
-                },
-            }
+        DirNode {
+            total_size: self.total_size + rhs.total_size,
+            dirs_count: self.dirs_count + rhs.dirs_count,
+            files_count: self.files_count + rhs.files_count,
+            unique_files_count: self.unique_files_count + rhs.unique_files_count,
         }
-
-        let lhs_dir = convert_to_dir(self);
-        let rhs_dir = convert_to_dir(rhs);
-        NodeKind::Dir(DirNode {
-            total_size: lhs_dir.total_size + rhs_dir.total_size,
-            files_count: lhs_dir.files_count + rhs_dir.files_count,
-            dupes_count: lhs_dir.dupes_count + rhs_dir.dupes_count,
-        })
     }
 }
 
-impl std::iter::Sum for NodeKind {
+impl std::iter::Sum for DirNode {
     fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
-        iter.fold(NodeKind::Test(TestNode), |a, b| a + b)
+        iter.fold(DirNode::default(), |a, b| a + b)
     }
 }
 
