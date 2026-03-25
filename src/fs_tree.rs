@@ -97,7 +97,6 @@ impl FsTree {
         }
 
         let root = stack.into_iter().next().unwrap();
-        self.resolve(root);
         self.roots
             .insert(root, path.parent().unwrap_or(Path::new("")).to_path_buf());
 
@@ -116,10 +115,10 @@ impl FsTree {
             self.index.fast_add(node_id, file_node.data);
             progress_bar.inc(1);
         }
-
-        progress_bar.finish_and_clear();
-
         assert_eq!(self.index.remove_ambiguous().len(), 0);
+
+        self.resolve(root);
+        progress_bar.finish_and_clear();
     }
 
     pub fn len(&self) -> usize {
