@@ -9,7 +9,7 @@ use crate::utils::bytes_to_string;
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct FileData {
     pub size: u64,
-    pub hash: Option<u64>,
+    pub hash: Option<u128>,
 }
 
 #[derive(Clone, Copy, Debug)]

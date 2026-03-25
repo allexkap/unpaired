@@ -2,21 +2,20 @@
 
 use std::{
     fs,
-    hash::Hasher,
-    io::{self, Read},
+    io::{Read, Result},
     path::Path,
 };
 
-use seahash::SeaHasher;
+use xxhash_rust::xxh3::Xxh3;
 
-pub fn hash_file(path: impl AsRef<Path>) -> io::Result<u64> {
+pub fn hash_file(path: impl AsRef<Path>) -> Result<u128> {
     let mut file = fs::File::open(path)?;
-    let mut buf = [0; 4096];
-    let mut hasher = SeaHasher::new();
+    let mut buf = [0; 1 << 20];
+    let mut hasher = Xxh3::new();
     loop {
         match file.read(&mut buf)? {
-            0 => return Ok(hasher.finish()),
-            n => hasher.write(&buf[..n]),
+            0 => return Ok(hasher.digest128()),
+            n => hasher.update(&buf[..n]),
         }
     }
 }
