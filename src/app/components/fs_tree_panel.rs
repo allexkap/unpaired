@@ -103,7 +103,10 @@ impl FsTreePanelState {
         entries.sort_by(|a, b| b.kind.get_uniqueness().total_cmp(&a.kind.get_uniqueness()));
 
         let mut list_state = ListState::default();
-        list_state.select_first();
+
+        if entries.len() > 0 {
+            list_state.select_first();
+        }
 
         Self {
             current,
@@ -113,7 +116,11 @@ impl FsTreePanelState {
     }
 
     fn next(&mut self) {
-        self.list_state.select_next();
+        if let Some(pos) = self.list_state.selected()
+            && pos != self.entries.len() - 1
+        {
+            self.list_state.select_next();
+        }
     }
 
     fn prev(&mut self) {

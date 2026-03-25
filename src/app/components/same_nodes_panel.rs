@@ -10,6 +10,7 @@ use crate::fs_tree::{FileGroup, FsTree, FsTreeNodeId};
 
 use super::Component;
 
+#[derive(Default)]
 pub struct SameNodesPanel {
     paths: Vec<String>,
     list_state: ListState,
@@ -24,6 +25,7 @@ impl SameNodesPanel {
                 .collect(),
             _ => Vec::new(),
         };
+
         Self {
             paths,
             list_state: ListState::default(),
