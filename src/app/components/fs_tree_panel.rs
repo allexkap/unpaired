@@ -72,7 +72,7 @@ impl FsTreeEntry {
             Span::raw(
                 self.kind
                     .as_error()
-                    .map(|e| format!(" ({e})"))
+                    .map(|e| format!(" [{e}]"))
                     .unwrap_or_default(),
             ),
         ]);
@@ -171,8 +171,8 @@ impl FsTreePanel {
     }
 
     fn back(&mut self) {
-        if self.stack.len() > 0 {
-            self.state = self.stack.pop().unwrap();
+        if let Some(state) = self.stack.pop() {
+            self.state = state
         }
     }
 }

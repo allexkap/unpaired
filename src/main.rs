@@ -48,7 +48,7 @@ fn main() -> Result<()> {
     pb.enable_steady_tick(Duration::from_millis(100));
 
     let t0 = Instant::now();
-    fs_tree.add_root(path, pb);
+    fs_tree.add_root(path, pb).unwrap();
     let t1 = Instant::now();
 
     println!("{:.3}s", (t1 - t0).as_secs_f64());

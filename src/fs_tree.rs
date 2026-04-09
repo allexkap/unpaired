@@ -3,9 +3,11 @@
 use std::{
     collections::HashMap,
     ffi::OsStr,
+    io,
     path::{Path, PathBuf},
 };
 
+use indextree::NodeId;
 use indicatif::ProgressBar;
 use walkdir::{DirEntry, WalkDir};
 
@@ -53,29 +55,56 @@ impl FsTree {
         }
     }
 
-    pub fn add_root(&mut self, path: impl AsRef<Path>, progress_bar: ProgressBar) {
-        let path = path.as_ref();
-        let entries = WalkDir::new(path)
-            .sort_by_file_name()
-            .into_iter()
-            .filter_map(|res| match res {
-                Ok(v) => Some(v),
-                Err(e) => {
-                    println!("{e}");
-                    None
-                }
-            });
+    pub fn add_root(
+        &mut self,
+        path: impl AsRef<Path>,
+        progress_bar: ProgressBar,
+    ) -> io::Result<()> {
+        let root_path = path.as_ref().canonicalize()?;
 
         progress_bar.set_message("Stage 1: Traversing the file system");
 
         let mut stack: Vec<FsTreeNodeId> = vec![];
-        for entry in entries {
+        for entry in WalkDir::new(&root_path).sort_by_file_name() {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(err) => {
+                    let Some(&last_node_id) = stack.last() else {
+                        return Err(err.into());
+                    };
+
+                    let err_node = err
+                        .into_io_error()
+                        .expect("WalkDir with follow_links=false return not IO error")
+                        .into();
+
+                    progress_bar.println(format!(
+                        "{:?}: {}",
+                        self.get_full_path(last_node_id),
+                        err_node
+                    ));
+                    self.arena[last_node_id].get_mut().kind = NodeKind::Error(err_node);
+                    continue;
+                }
+            };
+
             stack.truncate(entry.depth());
 
-            let node = self.process_entry(&entry);
+            let node = FsTreeNode {
+                name: entry.file_name().to_owned(),
+                kind: self
+                    .process_entry(&entry)
+                    .unwrap_or_else(|err| NodeKind::Error(err.into())),
+            };
+
             let node_id = self.arena.new_node(node);
             if let Some(parent) = stack.last() {
                 parent.append(node_id, &mut self.arena);
+            } else {
+                self.roots.insert(
+                    node_id,
+                    root_path.parent().unwrap_or(&root_path).to_path_buf(),
+                );
             }
 
             if let NodeKind::File(file_node) = self.arena[node_id].get().kind {
@@ -96,29 +125,37 @@ impl FsTree {
             stack.push(node_id);
         }
 
-        let root = stack.into_iter().next().unwrap();
-        self.roots
-            .insert(root, path.parent().unwrap_or(Path::new("")).to_path_buf());
-
         let ambiguous_files = self.index.remove_ambiguous();
 
         progress_bar.set_message("Stage 2: Hashing similar files");
 
-        for (node_id, data) in ambiguous_files.into_iter() {
+        for (node_id, _) in ambiguous_files.into_iter() {
             let path = self.get_full_path(node_id);
-            let new_data = FileData {
-                size: data.size,
-                hash: Some(hash_file(path).unwrap()),
-            };
-            let file_node = self.arena[node_id].get_mut().kind.as_file_mut().unwrap();
-            file_node.data = new_data;
-            self.index.fast_add(node_id, file_node.data);
-            progress_bar.inc(1);
+            let node = self.arena[node_id].get_mut();
+            match hash_file(path) {
+                Ok(hash) => {
+                    let file_node = node
+                        .kind
+                        .as_file_mut()
+                        .expect("node in ambiguous_files is not a file");
+                    file_node.data.hash = Some(hash);
+                    self.index.fast_add(node_id, file_node.data);
+                    progress_bar.inc(1);
+                }
+                Err(err) => {
+                    node.kind = NodeKind::Error(err.into());
+                    progress_bar.dec_length(1);
+                }
+            }
         }
         assert_eq!(self.index.remove_ambiguous().len(), 0);
 
-        self.resolve(root);
+        for root in self.roots.keys().cloned().collect::<Vec<_>>() {
+            self.resolve(root);
+        }
         progress_bar.finish_and_clear();
+
+        Ok(())
     }
 
     pub fn len(&self) -> usize {
@@ -152,11 +189,10 @@ impl FsTree {
             .and_then(|file_node| self.index.get(file_node.data))
     }
 
-    fn process_entry(&self, entry: &DirEntry) -> FsTreeNode {
-        let name = entry.file_name().to_owned();
-        let kind = match entry.file_type() {
+    fn process_entry(&self, entry: &DirEntry) -> io::Result<NodeKind> {
+        match entry.file_type() {
             ft if ft.is_file() => {
-                let meta = entry.metadata().unwrap();
+                let meta = entry.metadata()?;
 
                 let size = meta.len();
                 let hash = if self
@@ -164,7 +200,7 @@ impl FsTree {
                     .force_hash_size
                     .is_some_and(|x| x >= size && size != 0)
                 {
-                    Some(hash_file(entry.path()).unwrap())
+                    Some(hash_file(entry.path())?)
                 } else {
                     None
                 };
@@ -172,16 +208,18 @@ impl FsTree {
 
                 let modified = meta.modified().ok();
 
-                NodeKind::File(FileNode {
+                Ok(NodeKind::File(FileNode {
                     modified,
                     data,
                     copies_count: 0,
-                })
+                }))
             }
-            ft if ft.is_dir() => NodeKind::Dir(DirNode::default()),
-            ft => NodeKind::Error(format!("Unsupported filetype={ft:?}")),
-        };
-        FsTreeNode { name, kind }
+            ft if ft.is_dir() => Ok(NodeKind::Dir(DirNode::default())),
+            _ => Err(io::Error::new(
+                io::ErrorKind::Other,
+                format!("Unsupported filetype"),
+            )),
+        }
     }
 
     fn resolve(&mut self, node_id: FsTreeNodeId) -> DirNode {
@@ -189,7 +227,11 @@ impl FsTree {
             NodeKind::File(file_node) => NodeKind::File(FileNode {
                 data: file_node.data,
                 modified: file_node.modified,
-                copies_count: self.index.get(file_node.data).unwrap().len() as u64,
+                copies_count: self
+                    .index
+                    .get(file_node.data)
+                    .expect("file in fs_tree is missing in the index")
+                    .len() as u64,
             }),
             NodeKind::Dir(_) => NodeKind::Dir(
                 node_id
@@ -207,6 +249,42 @@ impl FsTree {
         self.arena[node_id].get_mut().kind = kind;
 
         deer
+    }
+
+    fn find_node_id(&self, path: &Path) -> Option<NodeId> {
+        'root_loop: for (root_id, root_path) in self.roots.iter() {
+            let Ok(rel_path) = path.strip_prefix(root_path) else {
+                continue;
+            };
+
+            println!("root_id={root_id} root_path={root_path:?}");
+
+            let mut parent_node_id = *root_id;
+            let mut child_id = None;
+            for part in rel_path.components() {
+                println!("part={part:?}");
+                for node_id in self.get_children(parent_node_id) {
+                    println!(
+                        "self.get_node(node_id).name={:?} | {:?}",
+                        self.get_node(node_id).name,
+                        part.as_os_str()
+                    );
+                    if self.get_node(node_id).name == part.as_os_str() {
+                        println!("yeah");
+                        child_id = Some(node_id);
+                        break;
+                    }
+                }
+                parent_node_id = match child_id {
+                    Some(id) => id,
+                    None => continue 'root_loop,
+                };
+                child_id = None;
+            }
+
+            return Some(parent_node_id);
+        }
+        None
     }
 
     pub fn get_full_path(&self, node_id: FsTreeNodeId) -> PathBuf {

@@ -1,6 +1,6 @@
 //! Filesystem node types and related data structures.
 
-use std::{ffi::OsString, fmt, time::SystemTime};
+use std::{ffi::OsString, fmt, io, time::SystemTime};
 
 use enum_as_inner::EnumAsInner;
 
@@ -27,11 +27,32 @@ pub struct DirNode {
     pub unique_files_count: u64,
 }
 
+#[derive(Clone, Debug)]
+pub struct ErrorNode(String);
+
+impl From<io::Error> for ErrorNode {
+    fn from(value: io::Error) -> Self {
+        ErrorNode(value.to_string())
+    }
+}
+
+impl From<String> for ErrorNode {
+    fn from(value: String) -> Self {
+        ErrorNode(value)
+    }
+}
+
+impl fmt::Display for ErrorNode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 #[derive(Clone, Debug, EnumAsInner)]
 pub enum NodeKind {
     Dir(DirNode),
     File(FileNode),
-    Error(String),
+    Error(ErrorNode),
 }
 
 impl NodeKind {
