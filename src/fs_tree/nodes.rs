@@ -1,6 +1,6 @@
 //! Filesystem node types and related data structures.
 
-use std::{ffi::OsString, fmt, io, time::SystemTime};
+use std::{ffi::OsString, fmt, time::SystemTime};
 
 use enum_as_inner::EnumAsInner;
 
@@ -25,34 +25,16 @@ pub struct DirNode {
     pub dirs_count: u64,
     pub files_count: u64,
     pub unique_files_count: u64,
-}
-
-#[derive(Clone, Debug)]
-pub struct ErrorNode(String);
-
-impl From<io::Error> for ErrorNode {
-    fn from(value: io::Error) -> Self {
-        ErrorNode(value.to_string())
-    }
-}
-
-impl From<String> for ErrorNode {
-    fn from(value: String) -> Self {
-        ErrorNode(value)
-    }
-}
-
-impl fmt::Display for ErrorNode {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
+    pub errors_count: u64,
+    pub hashed_files: u64,
 }
 
 #[derive(Clone, Debug, EnumAsInner)]
 pub enum NodeKind {
     Dir(DirNode),
     File(FileNode),
-    Error(ErrorNode),
+    SymLink(String),
+    Error(String),
 }
 
 impl NodeKind {
@@ -74,11 +56,16 @@ impl NodeKind {
             NodeKind::Dir(dir_node) => dir_node,
             NodeKind::File(file_node) => DirNode {
                 total_size: file_node.data.size,
-                dirs_count: 0,
                 files_count: 1,
                 unique_files_count: (file_node.copies_count == 1) as u64,
+                hashed_files: file_node.data.hash.is_some() as u64,
+                ..DirNode::default()
             },
-            _ => DirNode::default(),
+            NodeKind::SymLink(_) => DirNode::default(),
+            NodeKind::Error(_) => DirNode {
+                errors_count: 1,
+                ..DirNode::default()
+            },
         }
     }
 }
@@ -92,6 +79,8 @@ impl std::ops::Add for DirNode {
             dirs_count: self.dirs_count + rhs.dirs_count,
             files_count: self.files_count + rhs.files_count,
             unique_files_count: self.unique_files_count + rhs.unique_files_count,
+            errors_count: self.errors_count + rhs.errors_count,
+            hashed_files: self.hashed_files + rhs.hashed_files,
         }
     }
 }

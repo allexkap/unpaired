@@ -3,11 +3,10 @@
 use std::{
     collections::HashMap,
     ffi::OsStr,
-    io,
+    fs, io,
     path::{Path, PathBuf},
 };
 
-use indextree::NodeId;
 use indicatif::ProgressBar;
 use walkdir::{DirEntry, WalkDir};
 
@@ -20,13 +19,14 @@ pub use self::{
 
 mod index;
 mod nodes;
+mod serde_impl;
 
 type FsTreeArena = indextree::Arena<FsTreeNode>;
 
 pub type FsTreeNodeId = indextree::NodeId;
 
 /// Configuration for building an [`FsTree`].
-#[derive(Clone, Copy, Debug)]
+#[derive(Default, Clone, Copy, Debug)]
 pub struct FsTreeConfig {
     /// Force hashing for files up to this size.
     pub force_hash_size: Option<u64>,
@@ -73,10 +73,15 @@ impl FsTree {
                         return Err(err.into());
                     };
 
+                    let last_node_path = self.get_full_path(last_node_id);
+                    if let Some(err_path) = err.path() {
+                        assert_eq!(err_path, last_node_path);
+                    }
+
                     let err_node = err
                         .into_io_error()
                         .expect("WalkDir with follow_links=false return not IO error")
-                        .into();
+                        .to_string();
 
                     progress_bar.println(format!(
                         "{:?}: {}",
@@ -94,7 +99,7 @@ impl FsTree {
                 name: entry.file_name().to_owned(),
                 kind: self
                     .process_entry(&entry)
-                    .unwrap_or_else(|err| NodeKind::Error(err.into())),
+                    .unwrap_or_else(|err| NodeKind::Error(err.to_string())),
             };
 
             let node_id = self.arena.new_node(node);
@@ -125,11 +130,8 @@ impl FsTree {
             stack.push(node_id);
         }
 
-        let ambiguous_files = self.index.remove_ambiguous();
-
         progress_bar.set_message("Stage 2: Hashing similar files");
-
-        for (node_id, _) in ambiguous_files.into_iter() {
+        for (node_id, _) in self.index.remove_ambiguous().into_iter() {
             let path = self.get_full_path(node_id);
             let node = self.arena[node_id].get_mut();
             match hash_file(path) {
@@ -143,16 +145,14 @@ impl FsTree {
                     progress_bar.inc(1);
                 }
                 Err(err) => {
-                    node.kind = NodeKind::Error(err.into());
+                    node.kind = NodeKind::Error(err.to_string());
                     progress_bar.dec_length(1);
                 }
             }
         }
         assert_eq!(self.index.remove_ambiguous().len(), 0);
 
-        for root in self.roots.keys().cloned().collect::<Vec<_>>() {
-            self.resolve(root);
-        }
+        self.resolve_roots();
         progress_bar.finish_and_clear();
 
         Ok(())
@@ -215,10 +215,16 @@ impl FsTree {
                 }))
             }
             ft if ft.is_dir() => Ok(NodeKind::Dir(DirNode::default())),
-            _ => Err(io::Error::new(
-                io::ErrorKind::Other,
-                format!("Unsupported filetype"),
+            ft if ft.is_symlink() => Ok(NodeKind::SymLink(
+                fs::read_link(entry.path())?.to_string_lossy().to_string(),
             )),
+            _ => Ok(NodeKind::Error("Unknown filetype".to_string())),
+        }
+    }
+
+    fn resolve_roots(&mut self) {
+        for root in self.roots.keys().cloned().collect::<Vec<_>>() {
+            self.resolve(root);
         }
     }
 
@@ -249,42 +255,6 @@ impl FsTree {
         self.arena[node_id].get_mut().kind = kind;
 
         deer
-    }
-
-    fn find_node_id(&self, path: &Path) -> Option<NodeId> {
-        'root_loop: for (root_id, root_path) in self.roots.iter() {
-            let Ok(rel_path) = path.strip_prefix(root_path) else {
-                continue;
-            };
-
-            println!("root_id={root_id} root_path={root_path:?}");
-
-            let mut parent_node_id = *root_id;
-            let mut child_id = None;
-            for part in rel_path.components() {
-                println!("part={part:?}");
-                for node_id in self.get_children(parent_node_id) {
-                    println!(
-                        "self.get_node(node_id).name={:?} | {:?}",
-                        self.get_node(node_id).name,
-                        part.as_os_str()
-                    );
-                    if self.get_node(node_id).name == part.as_os_str() {
-                        println!("yeah");
-                        child_id = Some(node_id);
-                        break;
-                    }
-                }
-                parent_node_id = match child_id {
-                    Some(id) => id,
-                    None => continue 'root_loop,
-                };
-                child_id = None;
-            }
-
-            return Some(parent_node_id);
-        }
-        None
     }
 
     pub fn get_full_path(&self, node_id: FsTreeNodeId) -> PathBuf {

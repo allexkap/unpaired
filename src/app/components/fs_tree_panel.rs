@@ -36,7 +36,14 @@ impl FsTreeEntry {
     }
 
     fn to_item(&self) -> ListItem<'_> {
-        let uniq = match &self.kind {
+        let err_field = match &self.kind {
+            NodeKind::Dir(dir_node) if dir_node.errors_count != 0 => "!",
+            NodeKind::Error(_) => "!",
+            _ => " ",
+        };
+
+        let uniq_field = match &self.kind {
+            NodeKind::Dir(dir_node) if dir_node.files_count == 0 => Span::raw(format!("{:^9}", "")),
             NodeKind::Dir(dir_node) => Span::styled(
                 format!(
                     "{:>4}/{:<4}",
@@ -48,7 +55,7 @@ impl FsTreeEntry {
                 } else if dir_node.unique_files_count == 0 {
                     Color::Red
                 } else {
-                    Color::default()
+                    Color::Yellow
                 },
             ),
             NodeKind::File(file_node) => Span::styled(
@@ -59,22 +66,25 @@ impl FsTreeEntry {
                     Color::Red
                 },
             ),
-            NodeKind::Error(_) => Span::raw(format!("{:^9}", "-")),
+            _ => Span::raw(format!("{:^9}", "-")),
+        };
+
+        let info_field = match &self.kind {
+            NodeKind::SymLink(text) => format!("-> {text}"),
+            NodeKind::Error(text) => format!("[{text}]"),
+            _ => "".to_string(),
         };
 
         let line = Line::from(vec![
             Span::raw(format!("{:>4}", use_si_postfix(self.kind.get_total_size()))),
+            Span::raw("  "),
+            uniq_field,
             Span::raw(" "),
-            uniq,
-            Span::raw(" "),
+            Span::raw(err_field),
             Span::raw(if self.kind.is_dir() { "/" } else { " " }),
             Span::raw(&self.name),
-            Span::raw(
-                self.kind
-                    .as_error()
-                    .map(|e| format!(" [{e}]"))
-                    .unwrap_or_default(),
-            ),
+            Span::raw(" "),
+            Span::raw(info_field),
         ]);
 
         ListItem::new(line)
