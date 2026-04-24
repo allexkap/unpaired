@@ -31,10 +31,7 @@ impl App {
     pub fn new(fs_tree: FsTree) -> Self {
         let fs_tree_ref = Rc::new(RefCell::new(fs_tree));
         let main_panel = FsTreePanel::new(fs_tree_ref.clone());
-        let info_panel = match main_panel.get_selected() {
-            Some(node_id) => SameNodesPanel::new(node_id, &fs_tree_ref.borrow()),
-            None => SameNodesPanel::default(),
-        };
+        let info_panel = SameNodesPanel::new(main_panel.get_selected(), fs_tree_ref.clone());
 
         Self {
             main_panel,
@@ -102,11 +99,7 @@ impl App {
             | (KeyModifiers::CONTROL, KeyCode::Char('c') | KeyCode::Char('C')) => self.quit(),
             _ => self.main_panel.handle_key_event(key).unwrap(),
         }
-        // todo
-        self.info_panel = match self.main_panel.get_selected() {
-            Some(node_id) => SameNodesPanel::new(node_id, &self.fs_tree.borrow()),
-            None => SameNodesPanel::default(),
-        };
+        self.info_panel = SameNodesPanel::new(self.main_panel.get_selected(), self.fs_tree.clone());
     }
 
     fn quit(&mut self) {

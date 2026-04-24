@@ -207,10 +207,26 @@ impl Component for FsTreePanel {
 
         frame.render_widget(Span::raw(header_text), header);
 
-        let list = List::new(self.state.entries.iter().map(|entry| entry.to_item()))
-            .highlight_symbol("> ")
-            .highlight_spacing(HighlightSpacing::Always);
+        let mut list_state = &mut self.state.list_state;
 
-        frame.render_stateful_widget(list, content, &mut self.state.list_state);
+        let offset = list_state.offset().saturating_sub(1);
+        let list = List::new(
+            self.state
+                .entries
+                .iter()
+                .skip(offset)
+                .take(area.height as usize + 1)
+                .map(|entry| entry.to_item()),
+        )
+        .highlight_symbol("> ")
+        .highlight_spacing(HighlightSpacing::Always);
+
+        *list_state.offset_mut() -= offset;
+        list_state.selected_mut().as_mut().map(|x| *x -= offset);
+
+        frame.render_stateful_widget(list, content, &mut list_state);
+
+        *list_state.offset_mut() += offset;
+        list_state.selected_mut().as_mut().map(|x| *x += offset);
     }
 }
